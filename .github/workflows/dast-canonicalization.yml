@@ -8,25 +8,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Set up Node
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
+    - name: Install Node
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
 
-      - name: Install dependencies
-        working-directory: ./canonicalization-example
-        run: npm install
+    - name: Install dependencies
+      working-directory: canonicalization-example
+      run: npm install
 
-      - name: Start application
-        working-directory: ./canonicalization-example
-        run: |
-          npm start &
-          sleep 10
+    - name: Start application
+      working-directory: canonicalization-example
+      run: |
+        nohup npm start &
+        sleep 5
 
-      - name: Run OWASP ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.7.0
-        with:
-          target: "http://localhost:3000"
+    - name: OWASP ZAP Full Scan
+      uses: zaproxy/action-full-scan@v0.4.0
+      with:
+        target: 'http://localhost:3000'
+
