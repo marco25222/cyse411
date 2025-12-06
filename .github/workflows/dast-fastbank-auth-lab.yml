@@ -42,15 +42,14 @@ jobs:
 
       # Upload ZAP Report (HTML)
       - name: Upload ZAP HTML Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: zap-html-report
           path: report_html.html
 
       # Upload ZAP Markdown Report
       - name: Upload ZAP Markdown Report
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: zap-md-report
           path: report_md.md
-
