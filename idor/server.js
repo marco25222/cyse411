@@ -37,7 +37,7 @@ function fakeAuth(req, res, next) {
 // Apply fakeAuth to all routes below this line
 app.use(fakeAuth);
 
-// VULNERABLE endpoint: no ownership check (IDOR)
+// FIXED endpoint: enforce ownership / authorization
 app.get("/orders/:id", (req, res) => {
   const orderId = parseInt(req.params.id, 10);
 
@@ -46,11 +46,17 @@ app.get("/orders/:id", (req, res) => {
     return res.status(404).json({ error: "Order not found" });
   }
 
-  // BUG: no check that order.userId === req.user.id
+  const currentUser = req.user;
+
+  // If user is a normal customer, they can only see their own orders
+  if (currentUser.role === "customer" && order.userId !== currentUser.id) {
+    return res.status(403).json({ error: "Forbidden: not your order" });
+  }
+
+  // If user is support, you *could* add extra checks here, e.g. region match.
+  // For simplicity, we allow support to view all orders.
   return res.json(order);
 });
-
-
 
 // Health check
 app.get("/", (req, res) => {
@@ -62,3 +68,4 @@ const PORT = 3000;
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
+
