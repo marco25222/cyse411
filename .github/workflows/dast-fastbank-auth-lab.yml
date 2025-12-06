@@ -1,55 +1,37 @@
-name: "DAST – Fastbank Auth Lab"
+name: DAST - Fastbank Auth Lab
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # run manually from the Actions tab
 
 jobs:
   zap_scan:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Set up Node
       - name: Set up Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "18"
 
-      # Install app dependencies
       - name: Install dependencies
         working-directory: fastbank-auth-lab
         run: npm install
 
-      # Start the Fastbank Auth Lab server
-      - name: Start application
+      - name: Start Fastbank app
         working-directory: fastbank-auth-lab
         run: |
+          # start the app in the background
           nohup npm start &
-          sleep 10
+          # give the server time to boot
+          sleep 20
 
-      # OWASP ZAP Full Scan
-      - name: Run OWASP ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.4.0
+      - name: OWASP ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.7.0
         with:
+          # change this if Fastbank uses a different port
           target: "http://localhost:3000"
-          cmd-options: "-a"
-          allow_issue_writing: true
-          fail_on_warning: false
-          fail_on_error: true
-
-      # Upload ZAP Report (HTML)
-      - name: Upload ZAP HTML Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-html-report
-          path: report_html.html
-
-      # Upload ZAP Markdown Report
-      - name: Upload ZAP Markdown Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-md-report
-          path: report_md.md
+          cmd_options: "-a"
+          fail_action: true
