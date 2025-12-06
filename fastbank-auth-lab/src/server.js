@@ -2,7 +2,6 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const crypto = require("crypto");
-// bcrypt is installed but NOT used in the vulnerable baseline:
 const bcrypt = require("bcrypt");
 
 const app = express();
@@ -14,28 +13,26 @@ app.use(cookieParser());
 app.use(express.static("public"));
 
 /**
- * VULNERABLE FAKE USER DB
- * For simplicity, we start with a single user whose password is "password123".
- * In the vulnerable version, we hash with a fast hash (SHA-256-like).
+ * SECURE USER DB
+ * Replace fastHash with bcrypt hashing + salt.
  */
 const users = [
   {
     id: 1,
     username: "student",
-    // VULNERABLE: fast hash without salt
-    passwordHash: fastHash("password123") // students must replace this scheme with bcrypt
+    // Secure: bcrypt salted hash of "password123"
+    passwordHash: bcrypt.hashSync("password123", 10)
   }
 ];
 
-// In-memory session store
-const sessions = {}; // token -> { userId }
+// In-memory session store with expiration
+const sessions = {}; // token -> { userId, expiresAt }
 
 /**
- * VULNERABLE FAST HASH FUNCTION
- * Students MUST STOP using this and replace logic with bcrypt.
+ * Secure random token generator
  */
-function fastHash(password) {
-  return crypto.createHash("sha256").update(password).digest("hex");
+function generateSecureToken() {
+  return crypto.randomBytes(32).toString("hex");
 }
 
 // Helper: find user by username
@@ -43,62 +40,63 @@ function findUser(username) {
   return users.find((u) => u.username === username);
 }
 
-// Home API just to show who is logged in
+// Who am I?
 app.get("/api/me", (req, res) => {
   const token = req.cookies.session;
+
   if (!token || !sessions[token]) {
     return res.status(401).json({ authenticated: false });
   }
+
+  // Check expiration
+  if (Date.now() > sessions[token].expiresAt) {
+    delete sessions[token];
+    return res.status(401).json({ authenticated: false });
+  }
+
   const session = sessions[token];
   const user = users.find((u) => u.id === session.userId);
   res.json({ authenticated: true, username: user.username });
 });
 
 /**
- * VULNERABLE LOGIN ENDPOINT
- * - Uses fastHash instead of bcrypt
- * - Error messages leak whether username exists
- * - Session token is simple and predictable
- * - Cookie lacks security flags
+ * SECURE LOGIN ENDPOINT
  */
-app.post("/api/login", (req, res) => {
+app.post("/api/login", async (req, res) => {
   const { username, password } = req.body;
   const user = findUser(username);
 
-  if (!user) {
-    // VULNERABLE: username enumeration via message
-    return res
-      .status(401)
-      .json({ success: false, message: "Unknown username" });
-  }
+  // Secure generic error message to prevent username enumeration
+  const BAD_LOGIN = { success: false, message: "Invalid username or password" };
 
-  const candidateHash = fastHash(password);
-  if (candidateHash !== user.passwordHash) {
-    return res
-      .status(401)
-      .json({ success: false, message: "Wrong password" });
-  }
+  if (!user) return res.status(401).json(BAD_LOGIN);
 
-  // VULNERABLE: predictable token
-  const token = username + "-" + Date.now();
+  const passwordMatch = await bcrypt.compare(password, user.passwordHash);
+  if (!passwordMatch) return res.status(401).json(BAD_LOGIN);
 
-  // VULNERABLE: session stored without expiration
-  sessions[token] = { userId: user.id };
+  // Secure random session token
+  const token = generateSecureToken();
 
-  // VULNERABLE: cookie without httpOnly, secure, sameSite
+  // Session expires in 15 minutes
+  sessions[token] = {
+    userId: user.id,
+    expiresAt: Date.now() + 15 * 60 * 1000
+  };
+
+  // Secure cookie flags added
   res.cookie("session", token, {
-    // students must add: httpOnly: true, secure: true, sameSite: "lax"
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+    maxAge: 15 * 60 * 1000
   });
 
-  // Client-side JS (login.html) will store this token in localStorage (vulnerable)
-  res.json({ success: true, token });
+  res.json({ success: true });
 });
 
 app.post("/api/logout", (req, res) => {
   const token = req.cookies.session;
-  if (token && sessions[token]) {
-    delete sessions[token];
-  }
+  if (token && sessions[token]) delete sessions[token];
   res.clearCookie("session");
   res.json({ success: true });
 });
