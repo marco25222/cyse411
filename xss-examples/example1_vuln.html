@@ -1,6 +1,9 @@
-<!-- vulnerable -->
+<!-- fixed -->
 <div id="out"></div>
 <script>
-  const q = new URLSearchParams(location.search).get('q') || '';
-  document.getElementById('out').innerHTML = q; // dangerous
+  const params = new URLSearchParams(window.location.search);
+  const q = params.get('q') || '';
+
+  // SAFE: textContent does not interpret HTML as code
+  document.getElementById('out').textContent = q;
 </script>
