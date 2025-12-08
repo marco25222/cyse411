@@ -30,12 +30,11 @@ jobs:
         working-directory: canonicalization-example
         run: |
           npm start &
-          # give the app time to start
           sleep 40
 
       - name: Run OWASP ZAP full scan
         uses: zaproxy/action-full-scan@v0.13.0
         with:
           target: 'http://localhost:4000/'
-          fail_action: false        # still produce report even if alerts exist
+          fail_action: false
           allow_issue_writing: false
