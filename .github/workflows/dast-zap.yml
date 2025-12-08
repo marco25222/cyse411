@@ -21,25 +21,21 @@ jobs:
         with:
           node-version: '20'
 
-      # Install deps for the FASTBANK backend
-      - name: Install backend dependencies
-        working-directory: fastbank_insecure_classwork/backend
-        run: npm install
+      - name: Install dependencies
+        working-directory: canonicalization-example
+        run: |
+          npm install
 
-      # Start the backend on port 4000
-      - name: Start backend app
-        working-directory: fastbank_insecure_classwork/backend
+      - name: Start app on port 4000
+        working-directory: canonicalization-example
         run: |
           npm start &
-          sleep 20
+          # give the server time to boot
+          sleep 30
 
-      # Run ZAP Scan
       - name: Run OWASP ZAP full scan
         uses: zaproxy/action-full-scan@v0.13.0
         with:
           target: 'http://localhost:4000/'
           fail_action: true
           allow_issue_writing: false
-
-
-
