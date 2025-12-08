@@ -1,4 +1,4 @@
-// server.js (hardened version for ZAP = 0 findings)
+// server.js 
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -34,7 +34,7 @@ app.use(
   })
 );
 
-// Extra headers that ZAP checks for explicitly
+
 app.use((req, res, next) => {
   // Clickjacking protection
   res.setHeader('X-Frame-Options', 'DENY');
@@ -60,9 +60,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// ---------------------------------------------------------------------
-// Usual Express setup
-// ---------------------------------------------------------------------
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -71,16 +68,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 const BASE_DIR = path.resolve(__dirname, 'files');
 if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR, { recursive: true });
 
-// ---------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------
 
-// Resolve user path safely
+
 function resolveSafe(baseDir, userInput) {
   try {
     userInput = decodeURIComponent(userInput);
   } catch (e) {
-    // ignore bad encoding
   }
   return path.resolve(baseDir, userInput);
 }
@@ -100,7 +93,6 @@ const filenameValidator = body('filename')
     return true;
   });
 
-// Common handler to read file after validation
 function handleSafeRead(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
