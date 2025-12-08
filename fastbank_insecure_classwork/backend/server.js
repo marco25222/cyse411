@@ -4,6 +4,9 @@ const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
+const bcrypt = require("bcrypt");          // NEW
+const csrf = require("csurf");             // NEW
+const rateLimit = require("express-rate-limit"); // NEW
 
 const app = express();
 
@@ -17,6 +20,18 @@ app.use(
 
 app.use(bodyParser.json());
 app.use(cookieParser());
+
+// ---- CSRF protection ----
+const csrfProtection = csrf({ cookie: true });
+
+// ---- Rate limiting (fixes "Missing rate limiting") ----
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100,            // 100 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);
 
 // --- IN-MEMORY SQLITE DB (clean) ---
 const db = new sqlite3.Database(":memory:");
@@ -48,12 +63,10 @@ db.serialize(() => {
     );
   `);
 
-  const passwordHash = crypto
-    .createHash("sha256")
-    .update("password123")
-    .digest("hex");
+  // SECURE: bcrypt hash instead of fast SHA256
+  const passwordHash = bcrypt.hashSync("password123", 10);
 
-  // seed user using a parameterized query (not user-controlled, but kept consistent)
+  // seed user using a parameterized query
   db.run(
     `INSERT INTO users (username, password_hash, email)
      VALUES (?, ?, ?)`,
@@ -75,9 +88,7 @@ db.serialize(() => {
 // --- SESSION STORE (simple, predictable token exactly like assignment) ---
 const sessions = {};
 
-function fastHash(pwd) {
-  return crypto.createHash("sha256").update(pwd).digest("hex");
-}
+// no more fastHash() with SHA256 – we use bcrypt above
 
 function auth(req, res, next) {
   const sid = req.cookies.sid;
@@ -88,26 +99,25 @@ function auth(req, res, next) {
 }
 
 // ------------------------------------------------------------
-// Q4 — AUTH ISSUE 1 & 2: SHA256 fast hash + SQLi in username.
-// Q4 — AUTH ISSUE 3: Username enumeration.
-// Q4 — AUTH ISSUE 4: Predictable sessionId.
+// LOGIN (SQLi fixed + bcrypt used instead of SHA256)
 // ------------------------------------------------------------
-app.post("/login", (req, res) => {
+app.post("/login", csrfProtection, (req, res) => {
   const { username, password } = req.body;
 
   // SAFE: parameterized query instead of string concatenation
   const sql =
     "SELECT id, username, password_hash FROM users WHERE username = ?";
 
-  db.get(sql, [username], (err, user) => {
+  db.get(sql, [username], async (err, user) => {
     if (err) {
       return res.status(500).json({ error: "Database error" });
     }
 
     if (!user) return res.status(404).json({ error: "Unknown username" });
 
-    const candidate = fastHash(password);
-    if (candidate !== user.password_hash) {
+    // SECURE: compare with bcrypt
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
       return res.status(401).json({ error: "Wrong password" });
     }
 
@@ -119,6 +129,11 @@ app.post("/login", (req, res) => {
 
     res.json({ success: true });
   });
+});
+
+// Optional helper to fetch a CSRF token if your frontend needs it
+app.get("/csrf-token", csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
 });
 
 // ------------------------------------------------------------
@@ -135,7 +150,7 @@ app.get("/me", auth, (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Q1 — SQLi in transaction search (fixed)
+// Q1 — SQLi in transaction search (fixed already)
 // ------------------------------------------------------------
 app.get("/transactions", auth, (req, res) => {
   const q = req.query.q || "";
@@ -157,9 +172,9 @@ app.get("/transactions", auth, (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Q2 — Stored XSS + SQLi in feedback insert (SQLi fixed, XSS still separate)
+// Q2 — Stored XSS + SQLi in feedback insert (SQLi fixed)
 // ------------------------------------------------------------
-app.post("/feedback", auth, (req, res) => {
+app.post("/feedback", auth, csrfProtection, (req, res) => {
   const comment = req.body.comment;
   const userId = req.user.id;
 
@@ -191,9 +206,9 @@ app.get("/feedback", auth, (req, res) => {
 });
 
 // ------------------------------------------------------------
-// Q3 — CSRF + SQLi in email update (SQLi fixed)
+// Q3 — CSRF + SQLi in email update (SQLi fixed + CSRF added)
 // ------------------------------------------------------------
-app.post("/change-email", auth, (req, res) => {
+app.post("/change-email", auth, csrfProtection, (req, res) => {
   const newEmail = req.body.email;
 
   if (!newEmail.includes("@"))
