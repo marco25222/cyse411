@@ -3,6 +3,7 @@ const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
+const csrf = require("csurf");
 
 const app = express();
 const PORT = 3001;
@@ -10,6 +11,19 @@ const PORT = 3001;
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cookieParser());
+
+// --- CSRF PROTECTION MIDDLEWARE ---
+// Store CSRF token in a cookie so the client can send it back in a header or form field.
+const csrfProtection = csrf({ cookie: true });
+app.use(csrfProtection);
+
+// Optional helper: add token to all responses (for templates/front-end to read)
+app.use((req, res, next) => {
+  // if this throws in non-mutating requests, you can wrap in try/catch
+  res.locals.csrfToken = req.csrfToken();
+  next();
+});
+
 app.use(express.static("public"));
 
 /**
