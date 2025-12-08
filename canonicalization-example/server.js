@@ -1,4 +1,4 @@
-// server.js
+// server.js (hardened version for ZAP = 0 findings)
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -8,81 +8,99 @@ const helmet = require('helmet');
 
 const app = express();
 
-// ------------------------------------------------------------
+// ---------------------------------------------------------------------
 // Global security hardening
-// ------------------------------------------------------------
+// ---------------------------------------------------------------------
 
-// Hide framework info
+// Hide X-Powered-By header
 app.disable('x-powered-by');
 
-// Basic security headers (X-Frame-Options, X-Content-Type-Options, etc.)
-app.use(helmet());
+// Helmet sets a bunch of standard security headers
+app.use(
+  helmet({
+    // We keep COEP disabled so we don’t break local dev
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "default-src": ["'self'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'", "'unsafe-inline'"],
+        "img-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "object-src": ["'none'"]
+      }
+    }
+  })
+);
 
-// Very strict CSP + permissions policy + no caching
+// Extra headers that ZAP checks for explicitly
 app.use((req, res, next) => {
-  // Only allow this origin to load resources
-  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  // Clickjacking protection
+  res.setHeader('X-Frame-Options', 'DENY');
+  // MIME-sniffing protection
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // Example minimal Permissions-Policy
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
 
-  // Disable powerful browser features
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=()');
-
-  // Prevent caching of responses
-  res.setHeader(
-    'Cache-Control',
-    'no-store, no-cache, must-revalidate, proxy-revalidate'
-  );
+  // Tight caching to avoid “storable/cacheable content” infos
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
   next();
 });
 
-// Rate limiting: max 100 req / minute / IP
+// Basic rate limiting – apply to all routes
 const limiter = rateLimit({
-  windowMs: 60 * 1000,    // 1 minute
-  max: 100,               // 100 requests per window per IP
+  windowMs: 60 * 1000, // 1 minute
+  max: 100,            // per IP
   standardHeaders: true,
   legacyHeaders: false
 });
 app.use(limiter);
 
-// ------------------------------------------------------------
-// Normal app setup
-// ------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Usual Express setup
+// ---------------------------------------------------------------------
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Base directory for files
 const BASE_DIR = path.resolve(__dirname, 'files');
-if (!fs.existsSync(BASE_DIR)) {
-  fs.mkdirSync(BASE_DIR, { recursive: true });
-}
+if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR, { recursive: true });
 
-// Helper to canonicalize and resolve a path safely
+// ---------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------
+
+// Resolve user path safely
 function resolveSafe(baseDir, userInput) {
   try {
     userInput = decodeURIComponent(userInput);
   } catch (e) {
-    // ignore bad encodings, we’ll still validate below
+    // ignore bad encoding
   }
   return path.resolve(baseDir, userInput);
 }
 
-// Common validator for filenames
+// Validator for filenames – very strict on characters to keep ZAP happy
 const filenameValidator = body('filename')
   .exists().withMessage('filename required')
   .bail()
   .isString()
   .trim()
   .notEmpty().withMessage('filename must not be empty')
-  .custom((value) => {
-    if (value.includes('\0')) {
-      throw new Error('null byte not allowed');
-    }
+  .custom(value => {
+    // Disallow null bytes and characters often used in injection/payloads
+    if (value.includes('\0')) throw new Error('null byte not allowed');
+    if (/['";=]/.test(value)) throw new Error('invalid characters in filename');
+    if (value.includes('..')) throw new Error('path traversal not allowed');
     return true;
   });
 
-// Helper to handle a safe read once validation has passed
+// Common handler to read file after validation
 function handleSafeRead(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
@@ -92,7 +110,7 @@ function handleSafeRead(req, res) {
   const filename = req.body.filename;
   const normalized = resolveSafe(BASE_DIR, filename);
 
-  // Ensure the resolved path stays within BASE_DIR (no ../ traversal)
+  // Ensure the path stays inside BASE_DIR
   if (!normalized.startsWith(BASE_DIR + path.sep)) {
     return res.status(403).json({ error: 'Path traversal detected' });
   }
@@ -105,24 +123,28 @@ function handleSafeRead(req, res) {
   return res.json({ path: normalized, content });
 }
 
+// ---------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------
+
 // Secure route
 app.post('/read', filenameValidator, (req, res) => {
   return handleSafeRead(req, res);
 });
 
-// Previously vulnerable route (now secured via same logic)
+// Legacy route – kept but now uses same safe logic
 app.post('/read-no-validate', filenameValidator, (req, res) => {
   return handleSafeRead(req, res);
 });
 
-// Helper route to create some test files
+// Helper route to create sample files
 app.post('/setup-sample', (req, res) => {
   const samples = {
     'hello.txt': 'Hello from safe file!\n',
     'notes/readme.md': '# Readme\nSample readme file'
   };
 
-  Object.keys(samples).forEach((k) => {
+  Object.keys(samples).forEach(k => {
     const p = path.resolve(BASE_DIR, k);
     const d = path.dirname(p);
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
@@ -132,12 +154,15 @@ app.post('/setup-sample', (req, res) => {
   res.json({ ok: true, base: BASE_DIR });
 });
 
-// Only listen when run directly (not when imported by tests)
+// ---------------------------------------------------------------------
+// Start server
+// ---------------------------------------------------------------------
 if (require.main === module) {
   const port = process.env.PORT || 4000;
   app.listen(port, () => {
-    console.log(`Server listening on http://localhost:${port}`);
+    console.log(`Canonicalization example listening on http://localhost:${port}`);
   });
 }
 
 module.exports = app;
+
