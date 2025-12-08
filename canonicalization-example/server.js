@@ -3,8 +3,19 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');   // <-- NEW
 
 const app = express();
+
+// --- RATE LIMITING: max 100 requests per minute per IP ---
+const limiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute
+  max: 100,              // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use(limiter);        // <-- apply to all routes
+
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
