@@ -1,4 +1,4 @@
-
+const rateLimit = require("express-rate-limit");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
@@ -9,6 +9,15 @@ const bcrypt = require("bcrypt");
 const csrf = require("csurf");
 
 const app = express();
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(limiter);
+
 
 app.use(
   cors({
