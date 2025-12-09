@@ -9,16 +9,26 @@ const app = express();
 
 app.disable("x-powered-by");
 
+app.disable("x-powered-by");
+
 app.use(
   helmet({
     contentSecurityPolicy: {
       useDefaults: true,
       directives: {
         "default-src": ["'self'"],
-        "form-action": ["'self'"],
-        "frame-ancestors": ["'none'"]
+        "script-src": ["'self'"],
+        "img-src": ["'self'"],
+        "style-src": ["'self'"],
+        "object-src": ["'none'"],
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"]
       }
     },
+    frameguard: { action: "deny" },
+    hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
+    noSniff: true,
+    referrerPolicy: { policy: "no-referrer" },
     crossOriginEmbedderPolicy: { policy: "require-corp" },
     crossOriginOpenerPolicy: { policy: "same-origin" },
     crossOriginResourcePolicy: { policy: "same-origin" }
