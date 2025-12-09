@@ -39,7 +39,8 @@ jobs:
       - name: Run ZAP Scan (canonicalization-example)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: "http://localhost:4000/"
+          # NOTE: use host.docker.internal instead of localhost
+          target: "http://host.docker.internal:4000/"
           fail_action: false
           allow_issue_writing: false
           artifact_name: canonicalization-zap-report
@@ -73,7 +74,8 @@ jobs:
       - name: Run ZAP Scan (idor)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: "http://localhost:3000/"
+          # NOTE: host.docker.internal here too
+          target: "http://host.docker.internal:3000/"
           fail_action: false
           allow_issue_writing: false
           artifact_name: idor-zap-report
@@ -107,7 +109,8 @@ jobs:
       - name: Run ZAP Scan (fastbank-auth-lab)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: "http://localhost:3001/"
+          # And here
+          target: "http://host.docker.internal:3001/"
           fail_action: false
           allow_issue_writing: false
           artifact_name: fastbank-zap-report
