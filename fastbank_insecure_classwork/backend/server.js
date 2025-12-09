@@ -1,59 +1,27 @@
-// backend/server.js
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const crypto = require("crypto");
-const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
+const bcrypt = require("bcrypt");
+const csrf = require("csurf");
 
 const app = express();
-
-
-app.disable("x-powered-by");
-
-app.use(helmet());
-
-app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-  );
-
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-
-  res.setHeader(
-    "Cache-Control",
-    "no-store, no-cache, must-revalidate, proxy-revalidate"
-  );
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-
-  next();
-});
-
-const limiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false
-});
-app.use(limiter);
-
-
 
 app.use(
   cors({
     origin: ["http://localhost:3001", "http://127.0.0.1:3001"],
-    credentials: true
+    credentials: true,
   })
 );
 
 app.use(bodyParser.json());
 app.use(cookieParser());
+
+const csrfProtection = csrf({ cookie: true });
+app.use(csrfProtection);
 
 const db = new sqlite3.Database(":memory:");
 
@@ -84,10 +52,8 @@ db.serialize(() => {
     );
   `);
 
-  const passwordHash = crypto
-    .createHash("sha256")
-    .update("password123")
-    .digest("hex");
+  // BCrypt hash instead of fast SHA256
+  const passwordHash = bcrypt.hashSync("password123", 12);
 
   db.run(
     `INSERT INTO users (username, password_hash, email)
@@ -107,12 +73,15 @@ db.serialize(() => {
   );
 });
 
+// --- SESSION STORE (kept simple for lab) ---
 const sessions = {};
 
-function fastHash(pwd) {
-  return crypto.createHash("sha256").update(pwd).digest("hex");
+// helper: predictable token kept to match lab write-up
+function generateSessionId(username) {
+  return `${username}-${Date.now()}`;
 }
 
+// auth middleware
 function auth(req, res, next) {
   const sid = req.cookies.sid;
   if (!sid || !sessions[sid]) {
@@ -122,56 +91,39 @@ function auth(req, res, next) {
   next();
 }
 
-function isSafeUsername(u) {
-  return typeof u === "string" && /^[A-Za-z0-9_]{3,32}$/.test(u);
-}
-function isSafePassword(p) {
-  return typeof p === "string" && p.length >= 6 && p.length <= 64;
-}
-function isSafeSearch(q) {
-  return typeof q === "string" && /^[A-Za-z0-9\s]{0,50}$/.test(q);
-}
-function isSafeEmail(e) {
-  return (
-    typeof e === "string" &&
-    /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(e)
-  );
-}
-
 
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
 
-  if (!isSafeUsername(username) || !isSafePassword(password)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid credentials format" });
-  }
-
   const sql =
     "SELECT id, username, password_hash FROM users WHERE username = ?";
 
-  db.get(sql, [username], (err, user) => {
+  db.get(sql, [username], async (err, user) => {
     if (err) {
       return res.status(500).json({ error: "Database error" });
     }
 
     if (!user) {
+      // still reveals “unknown username” to match original lab behaviour
       return res.status(404).json({ error: "Unknown username" });
     }
 
-    const candidate = fastHash(password);
-    if (candidate !== user.password_hash) {
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
       return res.status(401).json({ error: "Wrong password" });
     }
 
-    const sid = `${username}-${Date.now()}`; // predictable on purpose (lab)
+    const sid = generateSessionId(username);
     sessions[sid] = { userId: user.id };
-
-    res.cookie("sid", sid, {}); // no HttpOnly/Secure – lab behavior
+    res.cookie("sid", sid, {}); // cookie flags left simple for the lab
 
     res.json({ success: true });
   });
+});
+
+// Return CSRF token to the front-end if you want to use it
+app.get("/csrf-token", (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
 });
 
 app.get("/me", auth, (req, res) => {
@@ -184,13 +136,9 @@ app.get("/me", auth, (req, res) => {
   });
 });
 
+
 app.get("/transactions", auth, (req, res) => {
-  let q = req.query.q || "";
-
-  if (!isSafeSearch(q)) {
-    q = "";
-  }
-
+  const q = req.query.q || "";
   const sql = `
     SELECT id, amount, description
     FROM transactions
@@ -210,21 +158,17 @@ app.get("/transactions", auth, (req, res) => {
 
 
 app.post("/feedback", auth, (req, res) => {
-  const comment = typeof req.body.comment === "string"
-    ? req.body.comment.slice(0, 500) // limit size
-    : "";
-
+  const comment = req.body.comment;
   const userId = req.user.id;
 
   const selectUserSql = "SELECT username FROM users WHERE id = ?";
   db.get(selectUserSql, [userId], (err, row) => {
-    if (err || !row) {
+    if (err) {
       return res.status(500).json({ error: "Database error" });
     }
     const username = row.username;
 
-    const insertSql =
-      "INSERT INTO feedback (user, comment) VALUES (?, ?)";
+    const insertSql = "INSERT INTO feedback (user, comment) VALUES (?, ?)";
     db.run(insertSql, [username, comment], (err2) => {
       if (err2) {
         return res.status(500).json({ error: "Database error" });
@@ -243,10 +187,11 @@ app.get("/feedback", auth, (req, res) => {
   });
 });
 
+
 app.post("/change-email", auth, (req, res) => {
   const newEmail = req.body.email;
 
-  if (!isSafeEmail(newEmail)) {
+  if (!newEmail.includes("@")) {
     return res.status(400).json({ error: "Invalid email" });
   }
 
