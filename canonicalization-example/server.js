@@ -11,16 +11,22 @@ app.disable("x-powered-by");
 
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "default-src": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'none'"]
+      }
+    },
+    crossOriginEmbedderPolicy: { policy: "require-corp" },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginResourcePolicy: { policy: "same-origin" }
   })
 );
 
+
 app.use((req, res, next) => {
-  // explicit CSP including directives ZAP complains about
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self'; frame-ancestors 'none'; form-action 'self'"
-  );
 
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
 
