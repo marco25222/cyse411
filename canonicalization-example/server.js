@@ -9,45 +9,46 @@ const helmet = require("helmet");
 const app = express();
 
 // ---------------------------------------------------------------------------
-// GLOBAL SECURITY (Helmet + headers)  — must be BEFORE express.static()
+// GLOBAL SECURITY (Helmet + headers)  — keep this BEFORE express.static()
 // ---------------------------------------------------------------------------
 
-// Hide "X-Powered-By"
+// Hide "X-Powered-By: Express"
 app.disable("x-powered-by");
 
-// Secure Helmet configuration (CodeQL happy, CSP enabled)
+// Baseline Helmet with default secure config (CodeQL likes this)
+app.use(helmet());
+
+// Strong CSP as a separate middleware (official Helmet pattern)
 app.use(
-  helmet({
-    contentSecurityPolicy: {
-      useDefaults: true,
-      directives: {
-        // Strong baseline
-        "default-src": ["'self'"],
-        "object-src": ["'none'"],
+  helmet.contentSecurityPolicy({
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "object-src": ["'none'"],
 
-        // Explicitly define directives that have no fallback (ZAP cares)
-        "frame-ancestors": ["'none'"],
-        "form-action": ["'self'"],
+      // Directives that have no fallback — define explicitly for ZAP
+      "frame-ancestors": ["'none'"],
+      "form-action": ["'self'"],
 
-        // Reasonable defaults
-        "script-src": ["'self'"],
-        "style-src": ["'self'"],
-        "img-src": ["'self'"],
-        "connect-src": ["'self'"],
-        "font-src": ["'self'"],
-        "base-uri": ["'self'"]
-      }
-    },
-    crossOriginEmbedderPolicy: true,
-    crossOriginOpenerPolicy: { policy: "same-origin" },
-    crossOriginResourcePolicy: { policy: "same-origin" },
-    referrerPolicy: { policy: "no-referrer" }
+      // Reasonable defaults
+      "script-src": ["'self'"],
+      "style-src": ["'self'"],
+      "img-src": ["'self'"],
+      "connect-src": ["'self'"],
+      "font-src": ["'self'"],
+      "base-uri": ["'self'"]
+    }
   })
 );
 
-// Extra headers ZAP likes (cache + Permissions-Policy)
+// Spectre-related isolation headers
+app.use(helmet.crossOriginResourcePolicy({ policy: "same-origin" }));
+app.use(helmet.crossOriginOpenerPolicy({ policy: "same-origin" }));
+app.use(helmet.crossOriginEmbedderPolicy({ policy: "require-corp" }));
+
+// Extra headers ZAP likes (Permissions-Policy + no cache)
 app.use((req, res, next) => {
-  // Lock down powerful APIs
+  // Lock down powerful browser features
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
 
   // No caching
@@ -61,7 +62,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global rate limiting (fixes all “Missing rate limiting” alerts)
+// Global rate limiting (fixes “Missing rate limiting” alerts)
 app.use(
   rateLimit({
     windowMs: 60 * 1000, // 1 minute
@@ -77,7 +78,7 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// IMPORTANT: static AFTER Helmet so robots.txt/sitemap.xml get CSP too
+// IMPORTANT: static AFTER Helmet so robots.txt/sitemap.xml also get CSP
 app.use(express.static(path.join(__dirname, "public")));
 
 const BASE_DIR = path.resolve(__dirname, "files");
@@ -136,7 +137,7 @@ function handleSafeRead(req, res) {
 app.post("/read", filenameValidator, handleSafeRead);
 app.post("/read-no-validate", filenameValidator, handleSafeRead);
 
-// Seed sample files
+// Seed some sample files
 app.post("/setup-sample", (req, res) => {
   const samples = {
     "hello.txt": "Hello secure world!\n",
