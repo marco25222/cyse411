@@ -1,6 +1,7 @@
 name: DAST - OWASP ZAP Full Scan
 
 on:
+  push:
   workflow_dispatch:
 
 permissions:
@@ -9,7 +10,11 @@ permissions:
   security-events: write
 
 jobs:
-  zap_scan:
+
+  # ==========================================
+  # 1) canonicalization-example (PORT 4000)
+  # ==========================================
+  zap_scan_canonicalization:
     runs-on: ubuntu-latest
 
     steps:
@@ -19,22 +24,90 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies
         working-directory: canonicalization-example
-        run: |
-          npm install
+        run: npm install
 
-      - name: Start app on port 4000
+      - name: Start canonicalization app
         working-directory: canonicalization-example
         run: |
           npm start &
           sleep 40
 
-      - name: Run OWASP ZAP full scan
+      - name: Run ZAP Scan (canonicalization-example)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: 'http://localhost:4000/'
+          target: "http://localhost:4000/"
           fail_action: false
           allow_issue_writing: false
+          artifact_name: canonicalization-zap-report
+
+
+  # ==========================================
+  # 2) idor (PORT 3000)
+  # ==========================================
+  zap_scan_idor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: idor
+        run: npm install
+
+      - name: Start idor app
+        working-directory: idor
+        run: |
+          npm start &
+          sleep 40
+
+      - name: Run ZAP Scan (idor)
+        uses: zaproxy/action-full-scan@v0.13.0
+        with:
+          target: "http://localhost:3000/"
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: idor-zap-report
+
+
+  # ==========================================
+  # 3) fastbank-auth-lab (PORT 3001)
+  # ==========================================
+  zap_scan_fastbank:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: fastbank-auth-lab
+        run: npm install
+
+      - name: Start fastbank-auth-lab app
+        working-directory: fastbank-auth-lab
+        run: |
+          npm start &
+          sleep 40
+
+      - name: Run ZAP Scan (fastbank-auth-lab)
+        uses: zaproxy/action-full-scan@v0.13.0
+        with:
+          target: "http://localhost:3001/"
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: fastbank-zap-report
