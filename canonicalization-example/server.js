@@ -63,7 +63,6 @@ app.use(
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
 
   next();
-});
 
 // GLOBAL RATE LIMIT (prevents all “Missing rate limiting” findings)
 app.use(
