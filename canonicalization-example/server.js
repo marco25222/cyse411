@@ -13,39 +13,41 @@ const app = express();
 // ------------------------------------------------------------
 
 // Hide "X-Powered-By: Express"
+// ------------------------------------------------------------
+// GLOBAL SECURITY HARDENING
+// ------------------------------------------------------------
+
+// Hide "X-Powered-By: Express"
 app.disable("x-powered-by");
 
-// Helmet with a strict, explicit CSP configuration
-// (keeps CodeQL happy and tightens security)
+// SAFE Helmet config — passes CodeQL
 app.use(
   helmet({
     contentSecurityPolicy: {
-      useDefaults: false,
       directives: {
-        "default-src": ["'self'"],
-        "script-src": ["'self'"],
-        "style-src": ["'self'"],
-        "img-src": ["'self'"],
-        "connect-src": ["'self'"],
-        "font-src": ["'self'"],
-        "object-src": ["'none'"],
-        "base-uri": ["'self'"],
-        "form-action": ["'self'"],
-        "frame-ancestors": ["'none'"]
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"]
       }
     },
-    // These two are also checked by some scanners
+    frameguard: { action: "deny" },
+    referrerPolicy: { policy: "no-referrer" },
     crossOriginOpenerPolicy: { policy: "same-origin" },
     crossOriginEmbedderPolicy: { policy: "require-corp" }
   })
 );
 
-// Extra security headers that Helmet doesn’t set exactly this way
+// Extra security headers ZAP expects
 app.use((req, res, next) => {
-  // Disable dangerous browser APIs
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
 
-  // Very strict caching rules (helps ZAP stop complaining)
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
@@ -55,6 +57,7 @@ app.use((req, res, next) => {
 
   next();
 });
+
 
 // Global rate limit (addresses “Missing rate limiting” style findings)
 app.use(
