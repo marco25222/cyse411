@@ -8,95 +8,116 @@ const helmet = require("helmet");
 
 const app = express();
 
-// =========================================================
-// GLOBAL SECURITY HARDENING
-// =========================================================
+/* -----------------------------------------------------------
+ * GLOBAL SECURITY HARDENING
+ * --------------------------------------------------------- */
 
-// Hide "X-Powered-By"
+// Hide "X-Powered-By: Express"
 app.disable("x-powered-by");
 
-// Helmet with properly configured CSP so CodeQL stops complaining
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'none'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'"],
-        imgSrc: ["'self'"],
-        connectSrc: ["'self'"],
-        fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        baseUri: ["'self'"],
-        formAction: ["'self'"],
-        frameAncestors: ["'none'"]
-      }
-    },
-    crossOriginOpenerPolicy: { policy: "same-origin" },
-    crossOriginEmbedderPolicy: { policy: "require-corp" }
-  })
-);
+// 1) Use Helmet with its normal secure defaults
+//    (this keeps CodeQL from flagging it as "insecure configuration")
+app.use(helmet());
 
-// Additional headers required for ZAP zero alerts
+// 2) Add our own strict headers on top, including CSP + Spectre isolation
 app.use((req, res, next) => {
+  // VERY explicit CSP so ZAP stops saying "directive with no fallback"
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self'",
+      "connect-src 'self'",
+      "font-src 'self'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'"
+    ].join("; ")
+  );
+
+  // Lock down powerful browser features
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
+
+  // Spectre isolation headers (fixes 'Insufficient Site Isolation' alert)
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+
+  // No caching – helps avoid some cache-related info alerts
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
   );
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
+
   next();
 });
 
-// Global rate limit to satisfy CodeQL
+// Global rate limit – fixes all the "Missing rate limiting" findings
 app.use(
   rateLimit({
-    windowMs: 60 * 1000,
-    max: 50,
+    windowMs: 60 * 1000, // 1 minute
+    max: 50,             // 50 requests/min/IP
     standardHeaders: true,
     legacyHeaders: false
   })
 );
 
-// =========================================================
-// APP SETUP
-// =========================================================
+/* -----------------------------------------------------------
+ * APP SETUP
+ * --------------------------------------------------------- */
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
 const BASE_DIR = path.resolve(__dirname, "files");
-if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR, { recursive: true });
+if (!fs.existsSync(BASE_DIR)) {
+  fs.mkdirSync(BASE_DIR, { recursive: true });
+}
 
-// =========================================================
-// SECURE FILE ACCESS
-// =========================================================
+/* -----------------------------------------------------------
+ * PATH TRAVERSAL PROTECTION
+ * --------------------------------------------------------- */
 
 function resolveSafe(baseDir, userInput) {
   try {
     userInput = decodeURIComponent(userInput);
-  } catch (e) {}
+  } catch (e) {
+    // ignore bad encodings; still validated below
+  }
   return path.resolve(baseDir, userInput);
 }
 
 const filenameValidator = body("filename")
   .exists()
+  .withMessage("filename is required")
+  .bail()
   .isString()
   .trim()
   .notEmpty()
+  .withMessage("filename must not be empty")
   .custom((value) => {
-    if (value.includes("\0")) throw new Error("Null byte not allowed");
+    if (value.includes("\0")) {
+      throw new Error("null byte not allowed");
+    }
     return true;
   });
 
 function handleSafeRead(req, res) {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
 
   const filename = req.body.filename;
   const resolved = resolveSafe(BASE_DIR, filename);
 
+  // Make sure the resolved path stays inside BASE_DIR
   if (!resolved.startsWith(BASE_DIR + path.sep)) {
     return res.status(403).json({ error: "Path traversal detected" });
   }
@@ -109,28 +130,38 @@ function handleSafeRead(req, res) {
   return res.json({ path: resolved, content });
 }
 
+/* -----------------------------------------------------------
+ * ROUTES
+ * --------------------------------------------------------- */
+
+// Secure endpoint
 app.post("/read", filenameValidator, handleSafeRead);
+
+// Old "no validate" endpoint, now safe as well
 app.post("/read-no-validate", filenameValidator, handleSafeRead);
 
+// Helper route to create sample files
 app.post("/setup-sample", (req, res) => {
   const samples = {
     "hello.txt": "Hello secure world!\n",
     "notes/readme.md": "# Safe Readme\nSample file content."
   };
 
-  for (const file in samples) {
+  for (const file of Object.keys(samples)) {
     const abs = path.resolve(BASE_DIR, file);
-    const d = path.dirname(abs);
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+    const dir = path.dirname(abs);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
     fs.writeFileSync(abs, samples[file], "utf8");
   }
 
   res.json({ ok: true, base: BASE_DIR });
 });
 
-// =========================================================
-// SERVER
-// =========================================================
+/* -----------------------------------------------------------
+ * SERVER
+ * --------------------------------------------------------- */
 
 if (require.main === module) {
   const PORT = process.env.PORT || 4000;
