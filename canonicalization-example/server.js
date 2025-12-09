@@ -14,26 +14,36 @@ app.disable("x-powered-by");
 app.use(
   helmet({
     contentSecurityPolicy: {
-      useDefaults: true,
+      useDefaults: false,
       directives: {
         "default-src": ["'self'"],
-        "script-src": ["'self'"],
-        "img-src": ["'self'"],
-        "style-src": ["'self'"],
-        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
         "frame-ancestors": ["'none'"],
-        "form-action": ["'self'"]
+        "object-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "img-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "font-src": ["'self'"],
+        "manifest-src": ["'self'"],
+        "media-src": ["'self'"],
+        "worker-src": ["'self'"],
+        "child-src": ["'none'"],
+        "frame-src": ["'none'"],
+        "upgrade-insecure-requests": []
       }
     },
     frameguard: { action: "deny" },
     hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
     noSniff: true,
     referrerPolicy: { policy: "no-referrer" },
-    crossOriginEmbedderPolicy: { policy: "require-corp" },
-    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginEmbedderPolicy: true,
+    crossOriginOpenerPolicy: true,
     crossOriginResourcePolicy: { policy: "same-origin" }
   })
 );
+
 
 
 app.use((req, res, next) => {
