@@ -82,15 +82,12 @@ db.serialize(() => {
   );
 });
 
-// --- SESSION STORE (kept simple for lab) ---
 const sessions = {};
 
-// helper: predictable token kept to match lab write-up
 function generateSessionId(username) {
   return `${username}-${Date.now()}`;
 }
 
-// auth middleware
 function auth(req, res, next) {
   const sid = req.cookies.sid;
   if (!sid || !sessions[sid]) {
@@ -113,7 +110,6 @@ app.post("/login", (req, res) => {
     }
 
     if (!user) {
-      // still reveals “unknown username” to match original lab behaviour
       return res.status(404).json({ error: "Unknown username" });
     }
 
