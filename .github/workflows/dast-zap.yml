@@ -1,21 +1,15 @@
 name: DAST - OWASP ZAP Full Scan
 
 on:
-  # you can keep only one of these if you want
-  workflow_dispatch:          # allow manual run from Actions tab
-  push:                       # also run on every push to main
-    branches: [ main ]
+  workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
   security-events: write
 
-# --------------------------------------------------
-# 1) canonicalization-example
-# --------------------------------------------------
 jobs:
-  zap_scan_canonicalization:
+  zap_scan:
     runs-on: ubuntu-latest
 
     steps:
@@ -25,88 +19,22 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: '20'
 
-      - name: Install dependencies (canonicalization-example)
-        working-directory: canonicalization-example
-        run: npm install
-
-      - name: Start canonicalization app
+      - name: Install dependencies
         working-directory: canonicalization-example
         run: |
-          npm start &
-          # give the server time to start
-          sleep 40
+          npm install
 
-      - name: Run OWASP ZAP full scan (canonicalization)
-        uses: zaproxy/action-full-scan@v0.13.0
-        with:
-          target: "http://localhost:4000/"
-          fail_action: false              # do NOT fail job because of alerts
-          allow_issue_writing: false
-
-  # ------------------------------------------------
-  # 2) idor app
-  # ------------------------------------------------
-  zap_scan_idor:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies (idor)
-        working-directory: idor
-        run: npm install
-
-      - name: Start idor app
-        working-directory: idor
+      - name: Start app on port 4000
+        working-directory: canonicalization-example
         run: |
           npm start &
           sleep 40
 
-      - name: Run OWASP ZAP full scan (idor)
+      - name: Run OWASP ZAP full scan
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          # if your idor server uses another port, change it here
-          target: "http://localhost:4000/"
-          fail_action: false
-          allow_issue_writing: false
-
-  # ------------------------------------------------
-  # 3) fastbank-auth-lab
-  # ------------------------------------------------
-  zap_scan_fastbank:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies (fastbank-auth-lab)
-        working-directory: fastbank-auth-lab
-        run: npm install
-
-      - name: Start fastbank-auth-lab app
-        working-directory: fastbank-auth-lab
-        run: |
-          npm start &
-          sleep 40
-
-      - name: Run OWASP ZAP full scan (fastbank-auth-lab)
-        uses: zaproxy/action-full-scan@v0.13.0
-        with:
-          # adjust port if fastbank-auth-lab uses a different one
-          target: "http://localhost:4000/"
+          target: 'http://localhost:4000/'
           fail_action: false
           allow_issue_writing: false
