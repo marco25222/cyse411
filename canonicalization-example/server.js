@@ -8,20 +8,14 @@ const helmet = require("helmet");
 
 const app = express();
 
-/* -----------------------------------------------------------
- * GLOBAL SECURITY HARDENING
- * --------------------------------------------------------- */
-
-// Hide "X-Powered-By: Express"
 app.disable("x-powered-by");
 
-// 1) Use Helmet with its normal secure defaults
-//    (this keeps CodeQL from flagging it as "insecure configuration")
+// Helmet first
 app.use(helmet());
 
-// 2) Add our own strict headers on top, including CSP + Spectre isolation
+// ⭐ IMPORTANT ⭐
+// CSP + COOP/COEP must come BEFORE express.static()
 app.use((req, res, next) => {
-  // VERY explicit CSP so ZAP stops saying "directive with no fallback"
   res.setHeader(
     "Content-Security-Policy",
     [
@@ -38,15 +32,13 @@ app.use((req, res, next) => {
     ].join("; ")
   );
 
-  // Lock down powerful browser features
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
 
-  // Spectre isolation headers (fixes 'Insufficient Site Isolation' alert)
+  // Spectre protection (fixes Low alert)
   res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
   res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
   res.setHeader("Cross-Origin-Resource-Policy", "same-site");
 
-  // No caching – helps avoid some cache-related info alerts
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
@@ -56,6 +48,10 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// NOW static files get CSP too
+app.use(express.static(path.join(__dirname, "public")));
+
 
 // Global rate limit – fixes all the "Missing rate limiting" findings
 app.use(
