@@ -23,22 +23,29 @@ app.use(
 );
 
 // SUPER STRONG custom CSP required for ZAP "zero alerts"
-app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    [
-      "default-src 'none'",
-      "script-src 'self'",
-      "style-src 'self'",
-      "img-src 'self'",
-      "connect-src 'self'",
-      "font-src 'self'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "frame-ancestors 'none'",
-      "object-src 'none'"
-    ].join("; ")
-  );
+// Helmet with properly configured CSP so CodeQL is satisfied
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'none'"],
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "img-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "font-src": ["'self'"],
+        "object-src": ["'none'"],
+        "base-uri": ["'self'"],
+        "form-action": ["'self'"],
+        "frame-ancestors": ["'none'"]
+      }
+    },
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginEmbedderPolicy: { policy: "require-corp" }
+  })
+);
+
 
   // Disable dangerous APIs
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
