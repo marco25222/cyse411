@@ -8,44 +8,49 @@ const helmet = require("helmet");
 
 const app = express();
 
-// -----------------------------------------------------------------------------
-//  GLOBAL SECURITY HEADERS (MUST COME BEFORE express.static())
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GLOBAL SECURITY (Helmet + headers)  — must be BEFORE express.static()
+// ---------------------------------------------------------------------------
 
+// Hide "X-Powered-By"
 app.disable("x-powered-by");
 
-// Helmet base protections
+// Secure Helmet configuration (CodeQL happy, CSP enabled)
 app.use(
   helmet({
-    contentSecurityPolicy: false // we will define custom CSP below
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        // Strong baseline
+        "default-src": ["'self'"],
+        "object-src": ["'none'"],
+
+        // Explicitly define directives that have no fallback (ZAP cares)
+        "frame-ancestors": ["'none'"],
+        "form-action": ["'self'"],
+
+        // Reasonable defaults
+        "script-src": ["'self'"],
+        "style-src": ["'self'"],
+        "img-src": ["'self'"],
+        "connect-src": ["'self'"],
+        "font-src": ["'self'"],
+        "base-uri": ["'self'"]
+      }
+    },
+    crossOriginEmbedderPolicy: true,
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    referrerPolicy: { policy: "no-referrer" }
   })
 );
 
-// FULL strict CSP applied to *every* route, including .txt, .xml files
+// Extra headers ZAP likes (cache + Permissions-Policy)
 app.use((req, res, next) => {
-  res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'none'; " +
-      "script-src 'self'; " +
-      "style-src 'self'; " +
-      "img-src 'self'; " +
-      "font-src 'self'; " +
-      "connect-src 'self'; " +
-      "object-src 'none'; " +
-      "base-uri 'self'; " +
-      "form-action 'self'; " +
-      "frame-ancestors 'none'"
-  );
-
-  // Spectre protections
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
-  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-
-  // Disable dangerous browser APIs
+  // Lock down powerful APIs
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
 
-  // Cache disabled for ZAP
+  // No caching
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
@@ -56,25 +61,23 @@ app.use((req, res, next) => {
   next();
 });
 
-// -----------------------------------------------------------------------------
-//  RATE LIMITING  (Fixes "Missing rate limiting" in CodeQL)
-// -----------------------------------------------------------------------------
+// Global rate limiting (fixes all “Missing rate limiting” alerts)
 app.use(
   rateLimit({
-    windowMs: 60 * 1000,
+    windowMs: 60 * 1000, // 1 minute
     max: 50,
     standardHeaders: true,
     legacyHeaders: false
   })
 );
 
-// -----------------------------------------------------------------------------
-//  EXPRESS SETUP
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// NORMAL EXPRESS SETUP
+// ---------------------------------------------------------------------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// CSP FIX: static files now include ALL security headers
+// IMPORTANT: static AFTER Helmet so robots.txt/sitemap.xml get CSP too
 app.use(express.static(path.join(__dirname, "public")));
 
 const BASE_DIR = path.resolve(__dirname, "files");
@@ -82,13 +85,15 @@ if (!fs.existsSync(BASE_DIR)) {
   fs.mkdirSync(BASE_DIR, { recursive: true });
 }
 
-// -----------------------------------------------------------------------------
-//  PATH TRAVERSAL PROTECTION
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// PATH TRAVERSAL PROTECTION
+// ---------------------------------------------------------------------------
 function resolveSafe(baseDir, userInput) {
   try {
     userInput = decodeURIComponent(userInput);
-  } catch (e) {}
+  } catch (e) {
+    // ignore bad encodings, we still validate below
+  }
   return path.resolve(baseDir, userInput);
 }
 
@@ -107,11 +112,14 @@ const filenameValidator = body("filename")
 
 function handleSafeRead(req, res) {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
 
   const filename = req.body.filename;
   const resolved = resolveSafe(BASE_DIR, filename);
 
+  // Ensure path stays inside BASE_DIR
   if (!resolved.startsWith(BASE_DIR + path.sep)) {
     return res.status(403).json({ error: "Path traversal detected" });
   }
@@ -128,7 +136,7 @@ function handleSafeRead(req, res) {
 app.post("/read", filenameValidator, handleSafeRead);
 app.post("/read-no-validate", filenameValidator, handleSafeRead);
 
-// Create sample files
+// Seed sample files
 app.post("/setup-sample", (req, res) => {
   const samples = {
     "hello.txt": "Hello secure world!\n",
@@ -137,17 +145,17 @@ app.post("/setup-sample", (req, res) => {
 
   for (const file in samples) {
     const abs = path.resolve(BASE_DIR, file);
-    const d = path.dirname(abs);
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+    const dir = path.dirname(abs);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(abs, samples[file], "utf8");
   }
 
   res.json({ ok: true, base: BASE_DIR });
 });
 
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // START SERVER
-// -----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 if (require.main === module) {
   const PORT = process.env.PORT || 4000;
   app.listen(PORT, () => {
