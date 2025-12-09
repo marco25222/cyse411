@@ -1,94 +1,65 @@
-const express = require("express");
-const path = require("path");
-const fs = require("fs");
-const { body, validationResult } = require("express-validator");
-const rateLimit = require("express-rate-limit");
-const helmet = require("helmet");
+// server.js
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const { body, validationResult } = require('express-validator');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 const app = express();
 
-app.disable("x-powered-by");
 
-app.disable("x-powered-by");
+app.disable('x-powered-by');
 
 app.use(
   helmet({
-    contentSecurityPolicy: {
-      useDefaults: false,
-      directives: {
-        "default-src": ["'self'"],
-        "base-uri": ["'self'"],
-        "form-action": ["'self'"],
-        "frame-ancestors": ["'none'"],
-        "object-src": ["'none'"],
-        "script-src": ["'self'"],
-        "style-src": ["'self'"],
-        "img-src": ["'self'"],
-        "connect-src": ["'self'"],
-        "font-src": ["'self'"],
-        "manifest-src": ["'self'"],
-        "media-src": ["'self'"],
-        "worker-src": ["'self'"],
-        "child-src": ["'none'"],
-        "frame-src": ["'none'"],
-        "upgrade-insecure-requests": []
-      }
-    },
-    frameguard: { action: "deny" },
-    hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
-    noSniff: true,
-    referrerPolicy: { policy: "no-referrer" },
-    crossOriginEmbedderPolicy: true,
-    crossOriginOpenerPolicy: true,
-    crossOriginResourcePolicy: { policy: "same-origin" }
+    contentSecurityPolicy: false
   })
 );
 
-
-
 app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'none'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self'",
+      "connect-src 'self'",
+      "font-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'"
+    ].join('; ')
+  );
 
-  res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=()');
 
   res.setHeader(
-    "Cache-Control",
-    "no-store, no-cache, must-revalidate, proxy-revalidate"
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate'
   );
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-
-  // Spectre / site isolation header
-  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
 
   next();
 });
 
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  max: 100, 
   standardHeaders: true,
-  legacyHeaders: false,
+  legacyHeaders: false
 });
 app.use(limiter);
-
-app.use((req, res, next) => {
-  if (typeof req.query.filename === "string") {
-    return res
-      .status(400)
-      .json({
-        error:
-          'The "filename" query parameter is not supported. Use POST /read instead.',
-      });
-  }
-  next();
-});
 
 
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(path.join(__dirname, 'public')));
 
-const BASE_DIR = path.resolve(__dirname, "files");
+const BASE_DIR = path.resolve(__dirname, 'files');
 if (!fs.existsSync(BASE_DIR)) {
   fs.mkdirSync(BASE_DIR, { recursive: true });
 }
@@ -101,19 +72,18 @@ function resolveSafe(baseDir, userInput) {
   return path.resolve(baseDir, userInput);
 }
 
-const filenameValidator = body("filename")
+const filenameValidator = body('filename')
   .exists()
-  .withMessage("filename required")
+  .withMessage('filename required')
   .bail()
   .isString()
   .trim()
   .notEmpty()
-  .withMessage("filename must not be empty")
-  // allow only safe filename characters
-  .matches(/^[A-Za-z0-9_.\-\/]+$/)
-  .withMessage("filename contains invalid characters")
+  .withMessage('filename must not be empty')
   .custom((value) => {
-    if (value.includes("\0")) throw new Error("null byte not allowed");
+    if (value.includes('\0')) {
+      throw new Error('null byte not allowed');
+    }
     return true;
   });
 
@@ -127,36 +97,38 @@ function handleSafeRead(req, res) {
   const normalized = resolveSafe(BASE_DIR, filename);
 
   if (!normalized.startsWith(BASE_DIR + path.sep)) {
-    return res.status(403).json({ error: "Path traversal detected" });
+    return res.status(403).json({ error: 'Path traversal detected' });
   }
 
   if (!fs.existsSync(normalized)) {
-    return res.status(404).json({ error: "File not found" });
+    return res.status(404).json({ error: 'File not found' });
   }
 
-  const content = fs.readFileSync(normalized, "utf8");
+  const content = fs.readFileSync(normalized, 'utf8');
   return res.json({ path: normalized, content });
 }
 
-app.post("/read", filenameValidator, (req, res) => {
+app.post('/read', filenameValidator, (req, res) => {
   return handleSafeRead(req, res);
 });
 
-app.post("/read-no-validate", filenameValidator, (req, res) => {
+app.post('/read-no-validate', filenameValidator, (req, res) => {
   return handleSafeRead(req, res);
 });
 
-app.post("/setup-sample", (req, res) => {
+app.post('/setup-sample', (req, res) => {
   const samples = {
-    "hello.txt": "Hello from safe file!\n",
-    "notes/readme.md": "# Readme\nSample readme file",
+    'hello.txt': 'Hello from safe file!\n',
+    'notes/readme.md': '# Readme\nSample readme file'
   };
+
   Object.keys(samples).forEach((k) => {
     const p = path.resolve(BASE_DIR, k);
     const d = path.dirname(p);
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-    fs.writeFileSync(p, samples[k], "utf8");
+    fs.writeFileSync(p, samples[k], 'utf8');
   });
+
   res.json({ ok: true, base: BASE_DIR });
 });
 
