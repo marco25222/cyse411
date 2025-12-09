@@ -10,25 +10,21 @@ const rateLimit = require("express-rate-limit");
 
 const app = express();
 
-// ------------------------------------------------------------
-// Global security hardening
-// ------------------------------------------------------------
 
-// Hide framework banner
 app.disable("x-powered-by");
 
-// Basic security headers (X-Frame-Options, X-Content-Type-Options, etc.)
 app.use(helmet());
 
-// Very strict CSP + permissions policy + no caching
 app.use((req, res, next) => {
-  // Only allow this origin to load resources
-  res.setHeader("Content-Security-Policy", "default-src 'self'");
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+  );
 
-  // Disable powerful browser features
-  res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  res.setHeader("Cross-Origin-Embedder-Policy", "require-corp");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
 
-  // Prevent caching of responses
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
@@ -39,14 +35,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting: max 100 req / minute / IP
 const limiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 100,            // limit each IP to 100 requests per window
+  windowMs: 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false
 });
 app.use(limiter);
+
 
 
 app.use(
@@ -126,9 +122,31 @@ function auth(req, res, next) {
   next();
 }
 
+function isSafeUsername(u) {
+  return typeof u === "string" && /^[A-Za-z0-9_]{3,32}$/.test(u);
+}
+function isSafePassword(p) {
+  return typeof p === "string" && p.length >= 6 && p.length <= 64;
+}
+function isSafeSearch(q) {
+  return typeof q === "string" && /^[A-Za-z0-9\s]{0,50}$/.test(q);
+}
+function isSafeEmail(e) {
+  return (
+    typeof e === "string" &&
+    /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(e)
+  );
+}
+
 
 app.post("/login", (req, res) => {
   const { username, password } = req.body;
+
+  if (!isSafeUsername(username) || !isSafePassword(password)) {
+    return res
+      .status(400)
+      .json({ error: "Invalid credentials format" });
+  }
 
   const sql =
     "SELECT id, username, password_hash FROM users WHERE username = ?";
@@ -147,17 +165,14 @@ app.post("/login", (req, res) => {
       return res.status(401).json({ error: "Wrong password" });
     }
 
-    // Predictable session id (kept intentionally for lab)
-    const sid = `${username}-${Date.now()}`;
+    const sid = `${username}-${Date.now()}`; // predictable on purpose (lab)
     sessions[sid] = { userId: user.id };
 
-    // Cookie intentionally not HttpOnly / secure (lab)
-    res.cookie("sid", sid, {});
+    res.cookie("sid", sid, {}); // no HttpOnly/Secure – lab behavior
 
     res.json({ success: true });
   });
 });
-
 
 app.get("/me", auth, (req, res) => {
   const sql = "SELECT username, email FROM users WHERE id = ?";
@@ -169,9 +184,13 @@ app.get("/me", auth, (req, res) => {
   });
 });
 
-
 app.get("/transactions", auth, (req, res) => {
-  const q = req.query.q || "";
+  let q = req.query.q || "";
+
+  if (!isSafeSearch(q)) {
+    q = "";
+  }
+
   const sql = `
     SELECT id, amount, description
     FROM transactions
@@ -189,8 +208,12 @@ app.get("/transactions", auth, (req, res) => {
   });
 });
 
+
 app.post("/feedback", auth, (req, res) => {
-  const comment = req.body.comment;
+  const comment = typeof req.body.comment === "string"
+    ? req.body.comment.slice(0, 500) // limit size
+    : "";
+
   const userId = req.user.id;
 
   const selectUserSql = "SELECT username FROM users WHERE id = ?";
@@ -200,7 +223,8 @@ app.post("/feedback", auth, (req, res) => {
     }
     const username = row.username;
 
-    const insertSql = "INSERT INTO feedback (user, comment) VALUES (?, ?)";
+    const insertSql =
+      "INSERT INTO feedback (user, comment) VALUES (?, ?)";
     db.run(insertSql, [username, comment], (err2) => {
       if (err2) {
         return res.status(500).json({ error: "Database error" });
@@ -222,7 +246,7 @@ app.get("/feedback", auth, (req, res) => {
 app.post("/change-email", auth, (req, res) => {
   const newEmail = req.body.email;
 
-  if (!newEmail || !newEmail.includes("@")) {
+  if (!isSafeEmail(newEmail)) {
     return res.status(400).json({ error: "Invalid email" });
   }
 
