@@ -8,12 +8,12 @@ const helmet = require("helmet");
 
 const app = express();
 
-// ------------------------------------------------------------
-// GLOBAL SECURITY HEADERS (APPLY TO ALL ROUTES + STATIC FILES)
-// ------------------------------------------------------------
 app.disable("x-powered-by");
 
-// Single secure Helmet config
+// ------------------------------------------------------------
+// GLOBAL SECURITY HEADERS (APPLIED BEFORE STATIC FILES)
+// ------------------------------------------------------------
+
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -28,39 +28,28 @@ app.use(
         "object-src": ["'none'"],
         "base-uri": ["'self'"],
         "form-action": ["'self'"],
-        "frame-ancestors": ["'none'"]
+        "frame-ancestors": ["'none'"],
+        "media-src": ["'self'"],
+        "manifest-src": ["'self'"]
       }
     },
     crossOriginOpenerPolicy: { policy: "same-origin" },
-    crossOriginEmbedderPolicy: { policy: "require-corp" }
+    crossOriginEmbedderPolicy: { policy: "require-corp" },
+    crossOriginResourcePolicy: { policy: "same-origin" }
   })
 );
 
-// Additional headers ZAP requires
+// Additional manual headers to satisfy ZAP fully
 app.use((req, res, next) => {
-  // ZAP Spectre fix
-  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
-
-  // Disable browser-powerful APIs
   res.setHeader("Permissions-Policy", "geolocation=(), microphone=()");
-
-  // No caching allowed
   res.setHeader(
     "Cache-Control",
     "no-store, no-cache, must-revalidate, proxy-revalidate"
   );
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
-
   next();
 });
-
-// Apply Helmet + headers BEFORE static
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
-
-// Serve static files AFTER CSP fix so robots.txt and sitemap.xml also get CSP
-app.use(express.static(path.join(__dirname, "public")));
 
 // ------------------------------------------------------------
 // RATE LIMITING
@@ -75,26 +64,39 @@ app.use(
 );
 
 // ------------------------------------------------------------
-// FILE SYSTEM SAFE READ
+// JSON + FORM PARSING
+// ------------------------------------------------------------
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// ------------------------------------------------------------
+// STATIC FILES — NOW GET CSP HEADERS TOO
+// ------------------------------------------------------------
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res) => {
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    );
+  }
+}));
+
+// ------------------------------------------------------------
+// SAFE FILE OPERATIONS
 // ------------------------------------------------------------
 const BASE_DIR = path.resolve(__dirname, "files");
 if (!fs.existsSync(BASE_DIR)) fs.mkdirSync(BASE_DIR, { recursive: true });
 
 function resolveSafe(baseDir, userInput) {
-  try {
-    userInput = decodeURIComponent(userInput);
-  } catch (e) {}
+  try { userInput = decodeURIComponent(userInput); } catch {}
   return path.resolve(baseDir, userInput);
 }
 
 const filenameValidator = body("filename")
-  .exists()
-  .withMessage("filename is required")
-  .bail()
+  .exists().withMessage("filename required")
   .isString()
   .trim()
-  .notEmpty()
-  .withMessage("filename must not be empty")
+  .notEmpty().withMessage("filename cannot be empty")
   .custom((value) => {
     if (value.includes("\0")) throw new Error("null byte not allowed");
     return true;
@@ -119,24 +121,23 @@ function handleSafeRead(req, res) {
   return res.json({ path: resolved, content });
 }
 
-// Endpoints
 app.post("/read", filenameValidator, handleSafeRead);
 app.post("/read-no-validate", filenameValidator, handleSafeRead);
 
+// Sample files
 app.post("/setup-sample", (req, res) => {
-  const samples = {
+  const files = {
     "hello.txt": "Hello secure world!\n",
-    "notes/readme.md": "# Safe Readme\nSample file content."
+    "notes/readme.md": "# Readme\nSecure sample file"
   };
 
-  for (const file in samples) {
-    const abs = path.resolve(BASE_DIR, file);
-    const d = path.dirname(abs);
-    if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-    fs.writeFileSync(abs, samples[file], "utf8");
+  for (const f in files) {
+    const full = path.resolve(BASE_DIR, f);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, files[f], "utf8");
   }
 
-  res.json({ ok: true, base: BASE_DIR });
+  res.json({ ok: true });
 });
 
 // ------------------------------------------------------------
@@ -144,9 +145,9 @@ app.post("/setup-sample", (req, res) => {
 // ------------------------------------------------------------
 if (require.main === module) {
   const PORT = process.env.PORT || 4000;
-  app.listen(PORT, () => {
-    console.log(`Secure server running at http://localhost:${PORT}`);
-  });
+  app.listen(PORT, () =>
+    console.log(`Secure server running on http://localhost:${PORT}`)
+  );
 }
 
 module.exports = app;
