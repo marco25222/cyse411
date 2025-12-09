@@ -1,15 +1,19 @@
 name: DAST - OWASP ZAP Full Scan
 
 on:
-  push:
+  # you can keep only one of these if you want
+  workflow_dispatch:          # allow manual run from Actions tab
+  push:                       # also run on every push to main
     branches: [ main ]
-  workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
   security-events: write
 
+# --------------------------------------------------
+# 1) canonicalization-example
+# --------------------------------------------------
 jobs:
   zap_scan_canonicalization:
     runs-on: ubuntu-latest
@@ -21,7 +25,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies (canonicalization-example)
         working-directory: canonicalization-example
@@ -29,20 +33,21 @@ jobs:
 
       - name: Start canonicalization app
         working-directory: canonicalization-example
-        env:
-          PORT: 4000
         run: |
           npm start &
+          # give the server time to start
           sleep 40
 
-      - name: Run OWASP ZAP full scan (canonicalization-example)
+      - name: Run OWASP ZAP full scan (canonicalization)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: 'http://localhost:4000/'
-          fail_action: false         # do not fail the job when alerts are found
-          allow_issue_writing: false # don't auto-create GitHub issues
-          artifact_name: canonicalization-zap-report
+          target: "http://localhost:4000/"
+          fail_action: false              # do NOT fail job because of alerts
+          allow_issue_writing: false
 
+  # ------------------------------------------------
+  # 2) idor app
+  # ------------------------------------------------
   zap_scan_idor:
     runs-on: ubuntu-latest
 
@@ -53,7 +58,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies (idor)
         working-directory: idor
@@ -61,8 +66,6 @@ jobs:
 
       - name: Start idor app
         working-directory: idor
-        env:
-          PORT: 5000
         run: |
           npm start &
           sleep 40
@@ -70,11 +73,14 @@ jobs:
       - name: Run OWASP ZAP full scan (idor)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: 'http://localhost:5000/'
+          # if your idor server uses another port, change it here
+          target: "http://localhost:4000/"
           fail_action: false
           allow_issue_writing: false
-          artifact_name: idor-zap-report
 
+  # ------------------------------------------------
+  # 3) fastbank-auth-lab
+  # ------------------------------------------------
   zap_scan_fastbank:
     runs-on: ubuntu-latest
 
@@ -85,16 +91,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install dependencies (fastbank-auth-lab)
         working-directory: fastbank-auth-lab
         run: npm install
 
-      - name: Start fastbank app
+      - name: Start fastbank-auth-lab app
         working-directory: fastbank-auth-lab
-        env:
-          PORT: 6000
         run: |
           npm start &
           sleep 40
@@ -102,7 +106,7 @@ jobs:
       - name: Run OWASP ZAP full scan (fastbank-auth-lab)
         uses: zaproxy/action-full-scan@v0.13.0
         with:
-          target: 'http://localhost:6000/'
+          # adjust port if fastbank-auth-lab uses a different one
+          target: "http://localhost:4000/"
           fail_action: false
           allow_issue_writing: false
-          artifact_name: fastbank-zap-report
